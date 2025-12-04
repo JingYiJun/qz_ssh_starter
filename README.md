@@ -8,7 +8,7 @@
 - **环境变量友好**：Base URL 可通过 `VC_BASE_URL`、`VC_PREFIX` 等环境变量注入，适配各类集群作业系统。
 - **安全默认值**：默认禁止密码登录，仅允许公钥；支持 `--public-key` 将密钥写入指定用户。
 - **智能镜像选择**：内置多条 GitHub 镜像线路测速，支持持久化选择。
-- **幂等操作**：多次运行不会重复安装，亦可通过 `stop` 子命令安全结束。
+- **幂等操作**：多次运行不会重复安装，亦可通过 `stop` / `stop-all` 子命令安全结束。
 
 ## 快速开始
 
@@ -22,6 +22,7 @@ wget https://raw.githubusercontent.com/jingyijun3104/qz_ssh_starter/main/qz_ssh_
 
 ```bash
 git clone https://github.com/jingyijun3104/qz_ssh_starter.git
+cd qz_ssh_starter
 ```
 
 如果无法访问 GitHub，可以使用镜像源下载，例如：
@@ -33,6 +34,7 @@ wget https://github.akams.cn/https://raw.githubusercontent.com/jingyijun3104/qz_
 
 ```bash
 git clone https://github.akams.cn/https://github.com/jingyijun3104/qz_ssh_starter.git
+cd qz_ssh_starter
 ```
 
 ### 运行脚本
@@ -58,7 +60,8 @@ bash qz_ssh_starter.sh --base-url "https://nat-notebook-inspire.sii.edu.cn${VC_P
 | `--port / -p`      | `wstunnel` 对外 WebSocket 端口，默认 `10080`                                   |
 | `--public-key`     | 要写入 `authorized_keys` 的内容（含算法前缀）                                  |
 | `--force`          | 若已有 wstunnel 进程，强制重启                                                 |
-| `stop`             | 子命令，终止当前脚本启动的所有 wstunnel                                        |
+| `stop`             | 子命令，停止当前脚本启动的 wstunnel（仅匹配当前脚本目录下的进程）              |
+| `stop-all`         | 子命令，停止所有 wstunnel server 进程（匹配所有 wstunnel server 进程）         |
 | `VC_BASE_URL`      | 完整 Base URL，若未传 `--base-url` 时使用                                      |
 | `VC_PREFIX`        | 仅包含路径的前缀（如 `/ws-XXX/...`），脚本会与 `VC_BASE_HOST` 拼接             |
 | `VC_BASE_HOST`     | 与 `VC_PREFIX` 搭配使用的 host，默认 `https://nat-notebook-inspire.sii.edu.cn` |
@@ -75,8 +78,11 @@ bash qz_ssh_starter.sh --public-key "ssh-ed25519 ..."
 # 重启并强行替换已有 wstunnel
 bash qz_ssh_starter.sh --force
 
-# 仅停止 wstunnel
+# 仅停止当前脚本启动的 wstunnel
 bash qz_ssh_starter.sh stop
+
+# 停止所有 wstunnel server 进程（包括其他脚本或手动启动的）
+bash qz_ssh_starter.sh stop-all
 ```
 
 ## 目录结构

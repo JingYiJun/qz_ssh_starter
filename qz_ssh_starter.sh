@@ -3,6 +3,8 @@
 #
 # 用法：
 #   ./qz_ssh_starter.sh [--base-url "https://host/base/path"] [--user ssh_user] [--port port] [--public-key "ssh-ed25519 ..."]
+#   ./qz_ssh_starter.sh stop        # 停止当前脚本启动的 wstunnel
+#   ./qz_ssh_starter.sh stop-all    # 停止所有 wstunnel server 进程
 #
 # 示例（基于环境变量，推荐）：
 #   export VC_PREFIX="/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE"
@@ -68,12 +70,15 @@ print_usage() {
   cat <<EOF
 用法：
   $0 [ssh_user] [port] [--public-key "ssh-ed25519 ..."] [--base-url https://host/base/path]
+  $0 stop        # 停止当前脚本启动的 wstunnel
+  $0 stop-all    # 停止所有 wstunnel server 进程
 
 说明：
   - 默认会从环境变量获取 Base URL，优先级：--base-url > VC_BASE_URL > (VC_BASE_HOST + VC_PREFIX)
   - ssh_user：可选，默认 root
   - port：    可选，wstunnel 对外 ws 端口，默认 10080
-  - stop：    子命令，停止当前 wstunnel
+  - stop：    子命令，停止当前脚本启动的 wstunnel（仅匹配当前脚本目录下的进程）
+  - stop-all：子命令，停止所有 wstunnel server 进程（匹配所有 wstunnel server 进程）
 EOF
 }
 
@@ -91,6 +96,12 @@ parse_args() {
 
   if [[ $# -gt 0 && "$1" == "stop" ]]; then
     stop_wstunnel
+    exit 0
+  fi
+
+  if [[ $# -gt 0 && "$1" == "stop-all" ]]; then
+    stop_all_wstunnel
+    exit 0
   fi
 
   # 兼容旧版：若第一个位置参数不是选项，则视作 base url
@@ -440,6 +451,28 @@ ensure_wstunnel() {
 # SSH server 相关
 #####################################
 
+install_basic_network_tools() {
+  log_info "安装基础网络工具..."
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log_warn "未找到 apt-get，跳过基础网络工具安装。"
+    return
+  fi
+
+  export DEBIAN_FRONTEND=noninteractive
+
+  if ! apt-get install -y \
+    openssh-server \
+    iputils-ping iputils-tracepath traceroute \
+    net-tools iproute2 \
+    dnsutils curl wget; then
+    log_error "安装基础网络工具失败，请检查网络或源配置。"
+    exit 1
+  fi
+
+  log_ok "基础网络工具安装完成。"
+}
+
 configure_sshd_security() {
   log_info "配置 sshd：禁止密码登录，仅允许公钥"
 
@@ -511,35 +544,41 @@ configure_authorized_keys() {
   chown -R "${SSH_USER}:${SSH_USER}" "$ssh_dir" || true
 }
 
-start_sshd_service() {
-  log_info "尝试启动 / 重启 sshd..."
+check_sshd_service() {
+  log_info "检查 sshd 服务状态..."
 
+  # 先检查 sshd 是否已经在运行
+  if pgrep -x sshd >/dev/null 2>&1; then
+    log_ok "检测到 sshd 进程正在运行，无需启动。"
+    return
+  fi
+
+  log_info "sshd 未运行，尝试启动..."
+
+  # 尝试使用 service 启动
   if command -v service >/dev/null 2>&1 && [[ -f /etc/init.d/ssh ]]; then
-    if service ssh restart; then
-      log_ok "已通过 service ssh restart 启动 sshd"
+    if service ssh start; then
+      log_ok "已通过 service ssh start 启动 sshd"
       return
     else
-      log_warn "service ssh restart 失败，尝试其他方式..."
+      log_warn "service ssh start 失败，尝试其他方式..."
     fi
   fi
 
+  # 尝试使用 systemctl 启动
   if command -v systemctl >/dev/null 2>&1; then
-    if systemctl restart ssh 2>/dev/null; then
-      log_ok "已通过 systemctl restart ssh 启动 sshd"
+    if systemctl start ssh 2>/dev/null; then
+      log_ok "已通过 systemctl start ssh 启动 sshd"
       return
     fi
   fi
 
+  # 如果都不行，直接启动 sshd
   local sshd_bin
   sshd_bin="$(command -v sshd || echo "/usr/sbin/sshd")"
   if [[ ! -x "$sshd_bin" ]]; then
     log_error "未找到 sshd 可执行文件。"
     exit 1
-  fi
-
-  if pgrep -x sshd >/dev/null 2>&1; then
-    log_ok "检测到已有 sshd 进程，无需再次启动。"
-    return
   fi
 
   nohup "$sshd_bin" -D >/var/log/sshd-wstunnel.log 2>&1 &
@@ -583,29 +622,10 @@ check_ssh_port_22() {
 }
 
 ensure_ssh_server() {
-  log_info "检查 openssh-server / sshd..."
-
-  if ! command -v sshd >/dev/null 2>&1; then
-    log_warn "未检测到 sshd，将尝试安装 openssh-server..."
-
-    if ! command -v apt-get >/dev/null 2>&1; then
-      log_error "未找到 apt-get，无法自动安装 openssh-server，请手动安装。"
-      exit 1
-    fi
-
-    apt-get update
-    if ! apt-get install -y openssh-server; then
-      log_error "apt 安装 openssh-server 失败，请检查网络或源配置。"
-      exit 1
-    fi
-    log_ok "openssh-server 安装完成。"
-  else
-    log_ok "检测到 sshd：$(command -v sshd)"
-  fi
-
+  install_basic_network_tools
   configure_sshd_security
   configure_authorized_keys
-  start_sshd_service
+  check_sshd_service
   check_ssh_port_22
 }
 
@@ -652,17 +672,24 @@ start_wstunnel_server() {
     "ws://0.0.0.0:${port}" \
     >>"$log_file" 2>&1 &
 
-  sleep 1
+  log_info "等待 wstunnel 启动..."
 
   local newpid
-  newpid=$(get_running_wstunnel_pid)
+  local max_attempts=10
+  local attempt=0
 
-  if [[ -n "$newpid" ]]; then
-    log_ok "wstunnel 已成功启动 (port=${port})，PID: $newpid"
-  else
-    log_error "wstunnel 启动失败，请检查日志：$log_file"
-    exit 1
-  fi
+  while [[ $attempt -lt $max_attempts ]]; do
+    sleep 1
+    newpid=$(get_running_wstunnel_pid)
+    if [[ -n "$newpid" ]]; then
+      log_ok "wstunnel 已成功启动 (port=${port})，PID: $newpid"
+      return
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  log_error "wstunnel 启动失败，等待 ${max_attempts} 秒后仍未检测到进程，请检查日志：$log_file"
+  exit 1
 }
 
 #####################################
@@ -711,6 +738,23 @@ get_running_wstunnel_pid() {
 stop_wstunnel() {
   local pids
   pids=$(pgrep -f "${BIN_DIR}/wstunnel server" || true)
+
+  if [[ -z "$pids" ]]; then
+    log_info "没有正在运行的 wstunnel 进程。"
+    exit 0
+  fi
+
+  log_warn "检测到以下 wstunnel 进程，将终止："
+  echo "$pids"
+
+  echo "$pids" | xargs kill -9
+  log_ok "已停止所有 wstunnel 服务。"
+  exit 0
+}
+
+stop_all_wstunnel() {
+  local pids
+  pids=$(pgrep -f "wstunnel server" || true)
 
   if [[ -z "$pids" ]]; then
     log_info "没有正在运行的 wstunnel 进程。"
