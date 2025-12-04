@@ -15,25 +15,25 @@
 ### 下载本项目脚本
 
 ```bash
-wget https://raw.githubusercontent.com/jingyijun3104/qz_ssh_starter/main/qz_ssh_starter.sh
+wget https://raw.githubusercontent.com/jingyijun/qz_ssh_starter/main/qz_ssh_starter.sh
 ```
 
 或者 clone 本项目
 
 ```bash
-git clone https://github.com/jingyijun3104/qz_ssh_starter.git
+git clone https://github.com/jingyijun/qz_ssh_starter.git
 cd qz_ssh_starter
 ```
 
 如果无法访问 GitHub，可以使用镜像源下载，例如：
 ```
-wget https://github.akams.cn/https://raw.githubusercontent.com/jingyijun3104/qz_ssh_starter/main/qz_ssh_starter.sh
+wget https://github.akams.cn/https://raw.githubusercontent.com/jingyijun/qz_ssh_starter/main/qz_ssh_starter.sh
 ```
 
 或者 
 
 ```bash
-git clone https://github.akams.cn/https://github.com/jingyijun3104/qz_ssh_starter.git
+git clone https://github.akams.cn/https://github.com/jingyijun/qz_ssh_starter.git
 cd qz_ssh_starter
 ```
 
@@ -103,7 +103,7 @@ bash qz_ssh_starter.sh stop-all
 
 ## 贡献者
 
-- [jingyijun3104](https://github.com/jingyijun3104)
+- [jingyijun](https://github.com/jingyijun)
 
 ## 鸣谢
 
