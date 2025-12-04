@@ -2,21 +2,26 @@
 # 自动安装 & 启动 openssh-server + wstunnel，并生成 SSH 连接命令
 #
 # 用法：
-#   ./start_ws_tunnel.sh "https://host/base/path" [ssh_user] [port] [--public-key "ssh-ed25519 ..."]
+#   ./qz_ssh_starter.sh [--base-url "https://host/base/path"] [--user ssh_user] [--port port] [--public-key "ssh-ed25519 ..."]
 #
-# 示例：
-#   ./start_ws_tunnel.sh \
-#     "https://nat-notebook-inspire.sii.edu.cn/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE" \
-#     root 10080 \
+# 示例（基于环境变量，推荐）：
+#   export VC_PREFIX="/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE"
+#   ./qz_ssh_starter.sh --public-key "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."
+#
+# 示例（显式指定 Base URL）：
+#   ./qz_ssh_starter.sh \
+#     --base-url "https://nat-notebook-inspire.sii.edu.cn/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE" \
+#     --user root \
+#     --port 10080 \
 #     --public-key "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."
 #
 # 环境变量：
+#   VC_BASE_URL        完整 base URL（优先级：--base-url > VC_BASE_URL > VC_BASE_HOST + VC_PREFIX）
+#   VC_PREFIX          仅 path（例如 /ws-XXX/...），脚本会与 VC_BASE_HOST 拼接
+#   VC_BASE_HOST       与 VC_PREFIX 组合时使用，默认 https://nat-notebook-inspire.sii.edu.cn
 #   WSTUNNEL_VERSION   wstunnel 版本，默认 10.5.1
 #   WSTUNNEL_MIRRORS   自定义镜像前缀，逗号分隔（会走测速+选择流程）
 #   DRY_RUN=1          只打印 wstunnel 命令，不真正启动 wstunnel server
-#   VC_BASE_URL        可选，完整 base URL（优先级最高）
-#   VC_PREFIX          可选，仅 path（例如 /ws-XXX/...），脚本会与 host 拼接
-#   VC_BASE_HOST       可选，和 VC_PREFIX 组合时使用，默认 https://nat-notebook-inspire.sii.edu.cn
 
 set -euo pipefail
 
