@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Shell runtime artifacts
+ws_tunnel_data/
+*.log
+
+# Temporary downloads
+*.tar
+*.tar.gz
+*.tmp
+
