@@ -392,53 +392,6 @@ github_proxy_select() {
 
 RTUNNEL_BIN=""
 
-get_latest_rtunnel_version() {
-  # 注意：github_proxy_select 应该在调用此函数之前已经执行过
-  # 这里不再调用它，避免其输出（log_info/log_ok）被命令替换捕获
-  # 直接从 releases 页面获取版本号，避免 GitHub API 速率限制
-
-  log_info "正在获取 rtunnel 最新版本..." >&2
-
-  local releases_url="https://github.com/JingYiJun/rtunnel/releases"
-  local final_releases_url
-  if [[ -z "$FASTEST_GITHUB_PROXY" ]]; then
-    final_releases_url="$releases_url"
-  else
-    local proxy="${FASTEST_GITHUB_PROXY%/}/"
-    final_releases_url="${proxy}${releases_url}"
-  fi
-
-  local page_content
-  if ! page_content=$(curl -sfL "$final_releases_url" 2>/dev/null); then
-    log_error "无法从 releases 页面获取版本信息，请检查网络或镜像设置。" >&2
-    exit 1
-  fi
-
-  # 从 releases 页面提取版本号，尝试多种模式：
-  # 1. 查找 "Release v1.1.0" 这样的文本
-  # 2. 查找 "/releases/tag/v1.1.0" 这样的链接
-  # 3. 查找 "tag/v1.1.0" 这样的文本
-  local latest_tag
-  latest_tag=$(echo "$page_content" | grep -oE 'Release v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/Release //')
-  
-  if [[ -z "$latest_tag" ]]; then
-    latest_tag=$(echo "$page_content" | grep -oE '/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's|/releases/tag/||')
-  fi
-  
-  if [[ -z "$latest_tag" ]]; then
-    latest_tag=$(echo "$page_content" | grep -oE 'tag/v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's|tag/||')
-  fi
-
-  if [[ -z "$latest_tag" ]]; then
-    log_error "无法从 releases 页面解析版本信息。" >&2
-    exit 1
-  fi
-
-  # 清理版本号，去除前后空白字符和换行符，确保只输出版本号
-  latest_tag=$(echo "$latest_tag" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  echo "$latest_tag"
-}
-
 download_and_install_rtunnel() {
   github_proxy_select
 
@@ -449,10 +402,10 @@ download_and_install_rtunnel() {
       version="v${version}"
     fi
   else
-    version=$(get_latest_rtunnel_version)
+    version="latest"
   fi
 
-  log_info "使用 rtunnel 版本：$version"
+  log_info "使用 rtunnel 版本：$version" >&2
 
   local arch_name
   case "$WST_ARCH" in
@@ -463,7 +416,7 @@ download_and_install_rtunnel() {
       arch_name="arm64"
       ;;
     *)
-      log_error "不支持的架构：$WST_ARCH"
+      log_error "不支持的架构：$WST_ARCH" >&2
       exit 1
       ;;
   esac
@@ -477,24 +430,24 @@ download_and_install_rtunnel() {
     final_url="${proxy}${base_url}"
   fi
 
-  log_info "准备从以下地址下载 rtunnel："
+  log_info "准备从以下地址下载 rtunnel：" >&2
   log_info "  $final_url"
 
   local tmp_tar
   tmp_tar="$(mktemp /tmp/rtunnel_XXXXXX.tar.gz)"
 
   if ! curl -fL "$final_url" -o "$tmp_tar"; then
-    log_error "下载 rtunnel 失败，请检查网络或镜像设置。"
+    log_error "下载 rtunnel 失败，请检查网络或镜像设置。" >&2
     rm -f "$tmp_tar"
     exit 1
   fi
 
-  log_info "正在解压 rtunnel..."
+  log_info "正在解压 rtunnel..." >&2
   local tmp_dir
   tmp_dir="$(mktemp -d /tmp/rtunnel_extract_XXXXXX)"
   
   if ! tar -xzf "$tmp_tar" -C "$tmp_dir"; then
-    log_error "解压 rtunnel 失败。"
+    log_error "解压 rtunnel 失败。" >&2
     rm -f "$tmp_tar"
     rm -rf "$tmp_dir"
     exit 1
@@ -505,7 +458,7 @@ download_and_install_rtunnel() {
   rtunnel_bin=$(find "$tmp_dir" -name "rtunnel" -type f | head -1)
   
   if [[ -z "$rtunnel_bin" || ! -f "$rtunnel_bin" ]]; then
-    log_error "解压后的文件中未找到 rtunnel 二进制文件。"
+    log_error "解压后的文件中未找到 rtunnel 二进制文件。" >&2
     rm -f "$tmp_tar"
     rm -rf "$tmp_dir"
     exit 1
@@ -518,17 +471,17 @@ download_and_install_rtunnel() {
   rm -f "$tmp_tar"
   rm -rf "$tmp_dir"
 
-  log_ok "rtunnel 已安装到：$BIN_DIR/rtunnel"
+  log_ok "rtunnel 已安装到：$BIN_DIR/rtunnel" >&2
 }
 
 ensure_rtunnel() {
   RTUNNEL_BIN="${BIN_DIR}/rtunnel"
   if [[ -x "$RTUNNEL_BIN" ]]; then
-    log_ok "检测到已有 rtunnel：$RTUNNEL_BIN"
+    log_ok "检测到已有 rtunnel：$RTUNNEL_BIN" >&2
     return
   fi
 
-  log_info "未检测到 rtunnel，开始下载..."
+  log_info "未检测到 rtunnel，开始下载..." >&2
   download_and_install_rtunnel
 }
 
@@ -537,10 +490,10 @@ ensure_rtunnel() {
 #####################################
 
 install_basic_network_tools() {
-  log_info "安装基础网络工具..."
+  log_info "安装基础网络工具..." >&2
 
   if ! command -v apt-get >/dev/null 2>&1; then
-    log_warn "未找到 apt-get，跳过基础网络工具安装。"
+    log_warn "未找到 apt-get，跳过基础网络工具安装。" >&2
     return
   fi
 
@@ -551,11 +504,11 @@ install_basic_network_tools() {
     iputils-ping iputils-tracepath traceroute \
     net-tools iproute2 \
     dnsutils curl wget; then
-    log_error "安装基础网络工具失败，请检查网络或源配置。"
+    log_error "安装基础网络工具失败，请检查网络或源配置。" >&2
     exit 1
   fi
 
-  log_ok "基础网络工具安装完成。"
+  log_ok "基础网络工具安装完成。" >&2
 }
 
 configure_sshd_security() {
