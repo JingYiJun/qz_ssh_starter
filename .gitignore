@@ -2,7 +2,7 @@
 .DS_Store
 
 # Shell runtime artifacts
-ws_tunnel_data/
+qz_ssh_data/
 *.log
 
 # Temporary downloads

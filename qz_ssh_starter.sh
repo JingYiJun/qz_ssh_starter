@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 自动安装 & 启动 openssh-server + wstunnel，并生成 SSH 连接命令
+# 自动安装 & 启动 openssh-server + rtunnel，并生成 SSH 连接命令
 #
 # 用法：
 #   ./qz_ssh_starter.sh [--base-url "https://host/base/path"] [--user ssh_user] [--port port] [--public-key "ssh-ed25519 ..."]
-#   ./qz_ssh_starter.sh stop        # 停止当前脚本启动的 wstunnel
-#   ./qz_ssh_starter.sh stop-all    # 停止所有 wstunnel server 进程
+#   ./qz_ssh_starter.sh stop        # 停止当前脚本启动的 rtunnel
+#   ./qz_ssh_starter.sh stop-all    # 停止所有 rtunnel server 进程
 #
 # 示例（基于环境变量，推荐）：
 #   export VC_PREFIX="/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE"
@@ -21,9 +21,8 @@
 #   VC_BASE_URL        完整 base URL（优先级：--base-url > VC_BASE_URL > VC_BASE_HOST + VC_PREFIX）
 #   VC_PREFIX          仅 path（例如 /ws-XXX/...），脚本会与 VC_BASE_HOST 拼接
 #   VC_BASE_HOST       与 VC_PREFIX 组合时使用，默认 https://nat-notebook-inspire.sii.edu.cn
-#   WSTUNNEL_VERSION   wstunnel 版本，默认 10.5.1
-#   WSTUNNEL_MIRRORS   自定义镜像前缀，逗号分隔（会走测速+选择流程）
-#   DRY_RUN=1          只打印 wstunnel 命令，不真正启动 wstunnel server
+#   RTUNNEL_VERSION    rtunnel 版本，默认自动获取最新稳定版本（vx.y.z）
+#   DRY_RUN=1          只打印 rtunnel 命令，不真正启动 rtunnel server
 
 set -euo pipefail
 
@@ -32,7 +31,7 @@ set -euo pipefail
 #####################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="${SCRIPT_DIR}/ws_tunnel_data"
+DATA_DIR="${SCRIPT_DIR}/qz_ssh_data"
 BIN_DIR="${DATA_DIR}/bin"
 LOG_DIR="${DATA_DIR}/logs"
 
@@ -70,15 +69,15 @@ print_usage() {
   cat <<EOF
 用法：
   $0 [ssh_user] [port] [--public-key "ssh-ed25519 ..."] [--base-url https://host/base/path]
-  $0 stop        # 停止当前脚本启动的 wstunnel
-  $0 stop-all    # 停止所有 wstunnel server 进程
+  $0 stop        # 停止当前脚本启动的 rtunnel
+  $0 stop-all    # 停止所有 rtunnel server 进程
 
 说明：
   - 默认会从环境变量获取 Base URL，优先级：--base-url > VC_BASE_URL > (VC_BASE_HOST + VC_PREFIX)
   - ssh_user：可选，默认 root
-  - port：    可选，wstunnel 对外 ws 端口，默认 10080
-  - stop：    子命令，停止当前脚本启动的 wstunnel（仅匹配当前脚本目录下的进程）
-  - stop-all：子命令，停止所有 wstunnel server 进程（匹配所有 wstunnel server 进程）
+  - port：    可选，rtunnel 对外 ws 端口，默认 10080
+  - stop：    子命令，停止当前脚本启动的 rtunnel（仅匹配当前脚本目录下的进程）
+  - stop-all：子命令，停止所有 rtunnel server 进程（匹配所有 rtunnel server 进程）
 EOF
 }
 
@@ -88,19 +87,19 @@ EOF
 
 BASE_URL=""
 SSH_USER="root"
-WSTUNNEL_PORT="10080"
+RTUNNEL_PORT="10080"
 PUBLIC_KEY=""
 
 parse_args() {
   FORCE_START="0"
 
   if [[ $# -gt 0 && "$1" == "stop" ]]; then
-    stop_wstunnel
+    stop_rtunnel
     exit 0
   fi
 
   if [[ $# -gt 0 && "$1" == "stop-all" ]]; then
-    stop_all_wstunnel
+    stop_all_rtunnel
     exit 0
   fi
 
@@ -116,7 +115,7 @@ parse_args() {
     shift
   fi
   if [[ $# -ge 1 && "$1" != -* ]]; then
-    WSTUNNEL_PORT="$1"
+    RTUNNEL_PORT="$1"
     shift
   fi
 
@@ -127,7 +126,7 @@ parse_args() {
         shift 2
         ;;
       -p|--port)
-        WSTUNNEL_PORT="$2"
+        RTUNNEL_PORT="$2"
         shift 2
         ;;
       --public-key)
@@ -388,63 +387,149 @@ github_proxy_select() {
 }
 
 #####################################
-# wstunnel 下载 & 安装
+# rtunnel 下载 & 安装
 #####################################
 
-WSTUNNEL_BIN=""
-download_and_install_wstunnel() {
+RTUNNEL_BIN=""
+
+get_latest_rtunnel_version() {
+  # 注意：github_proxy_select 应该在调用此函数之前已经执行过
+  # 这里不再调用它，避免其输出（log_info/log_ok）被命令替换捕获
+  # 直接从 releases 页面获取版本号，避免 GitHub API 速率限制
+
+  log_info "正在获取 rtunnel 最新版本..." >&2
+
+  local releases_url="https://github.com/JingYiJun/rtunnel/releases"
+  local final_releases_url
+  if [[ -z "$FASTEST_GITHUB_PROXY" ]]; then
+    final_releases_url="$releases_url"
+  else
+    local proxy="${FASTEST_GITHUB_PROXY%/}/"
+    final_releases_url="${proxy}${releases_url}"
+  fi
+
+  local page_content
+  if ! page_content=$(curl -sfL "$final_releases_url" 2>/dev/null); then
+    log_error "无法从 releases 页面获取版本信息，请检查网络或镜像设置。" >&2
+    exit 1
+  fi
+
+  # 从 releases 页面提取版本号，尝试多种模式：
+  # 1. 查找 "Release v1.1.0" 这样的文本
+  # 2. 查找 "/releases/tag/v1.1.0" 这样的链接
+  # 3. 查找 "tag/v1.1.0" 这样的文本
+  local latest_tag
+  latest_tag=$(echo "$page_content" | grep -oE 'Release v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/Release //')
+  
+  if [[ -z "$latest_tag" ]]; then
+    latest_tag=$(echo "$page_content" | grep -oE '/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's|/releases/tag/||')
+  fi
+  
+  if [[ -z "$latest_tag" ]]; then
+    latest_tag=$(echo "$page_content" | grep -oE 'tag/v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's|tag/||')
+  fi
+
+  if [[ -z "$latest_tag" ]]; then
+    log_error "无法从 releases 页面解析版本信息。" >&2
+    exit 1
+  fi
+
+  # 清理版本号，去除前后空白字符和换行符，确保只输出版本号
+  latest_tag=$(echo "$latest_tag" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  echo "$latest_tag"
+}
+
+download_and_install_rtunnel() {
   github_proxy_select
 
   local version
-  version="${WSTUNNEL_VERSION:-10.5.1}"
-  local base_tar_url="https://github.com/erebe/wstunnel/releases/download/v${version}/wstunnel_${version}_linux_${WST_ARCH}.tar.gz"
-
-  local final_url
-  if [[ -z "$FASTEST_GITHUB_PROXY" ]]; then
-    final_url="$base_tar_url"
+  if [[ -n "${RTUNNEL_VERSION:-}" ]]; then
+    version="$RTUNNEL_VERSION"
+    if [[ "$version" != v* ]]; then
+      version="v${version}"
+    fi
   else
-    local proxy="${FASTEST_GITHUB_PROXY%/}/"
-    final_url="${proxy}${base_tar_url}"
+    version=$(get_latest_rtunnel_version)
   fi
 
-  log_info "准备从以下地址下载 wstunnel："
+  log_info "使用 rtunnel 版本：$version"
+
+  local arch_name
+  case "$WST_ARCH" in
+    amd64)
+      arch_name="amd64"
+      ;;
+    arm64)
+      arch_name="arm64"
+      ;;
+    *)
+      log_error "不支持的架构：$WST_ARCH"
+      exit 1
+      ;;
+  esac
+
+  local base_url="https://github.com/JingYiJun/rtunnel/releases/download/${version}/rtunnel-linux-${arch_name}.tar.gz"
+  local final_url
+  if [[ -z "$FASTEST_GITHUB_PROXY" ]]; then
+    final_url="$base_url"
+  else
+    local proxy="${FASTEST_GITHUB_PROXY%/}/"
+    final_url="${proxy}${base_url}"
+  fi
+
+  log_info "准备从以下地址下载 rtunnel："
   log_info "  $final_url"
 
   local tmp_tar
-  tmp_tar="$(mktemp /tmp/wstunnel_XXXXXX.tar.gz)"
+  tmp_tar="$(mktemp /tmp/rtunnel_XXXXXX.tar.gz)"
 
   if ! curl -fL "$final_url" -o "$tmp_tar"; then
-    log_error "下载 wstunnel 失败，请检查网络或镜像设置。"
+    log_error "下载 rtunnel 失败，请检查网络或镜像设置。"
     rm -f "$tmp_tar"
     exit 1
   fi
 
+  log_info "正在解压 rtunnel..."
   local tmp_dir
-  tmp_dir="$(mktemp -d /tmp/wstunnel_XXXXXX)"
-  tar -xf "$tmp_tar" -C "$tmp_dir"
-
-  if [[ ! -f "$tmp_dir/wstunnel" ]]; then
-    log_error "在 tar 包中未找到 wstunnel 可执行文件。"
-    rm -rf "$tmp_dir" "$tmp_tar"
+  tmp_dir="$(mktemp -d /tmp/rtunnel_extract_XXXXXX)"
+  
+  if ! tar -xzf "$tmp_tar" -C "$tmp_dir"; then
+    log_error "解压 rtunnel 失败。"
+    rm -f "$tmp_tar"
+    rm -rf "$tmp_dir"
     exit 1
   fi
 
-  mv "$tmp_dir/wstunnel" "$BIN_DIR/wstunnel"
-  chmod +x "$BIN_DIR/wstunnel"
-  rm -rf "$tmp_dir" "$tmp_tar"
+  # 查找解压后的 rtunnel 二进制文件
+  local rtunnel_bin
+  rtunnel_bin=$(find "$tmp_dir" -name "rtunnel" -type f | head -1)
+  
+  if [[ -z "$rtunnel_bin" || ! -f "$rtunnel_bin" ]]; then
+    log_error "解压后的文件中未找到 rtunnel 二进制文件。"
+    rm -f "$tmp_tar"
+    rm -rf "$tmp_dir"
+    exit 1
+  fi
 
-  log_ok "wstunnel 已安装到：$BIN_DIR/wstunnel"
+  mv "$rtunnel_bin" "$BIN_DIR/rtunnel"
+  chmod +x "$BIN_DIR/rtunnel"
+
+  # 清理临时文件
+  rm -f "$tmp_tar"
+  rm -rf "$tmp_dir"
+
+  log_ok "rtunnel 已安装到：$BIN_DIR/rtunnel"
 }
 
-ensure_wstunnel() {
-  WSTUNNEL_BIN="${BIN_DIR}/wstunnel"
-  if [[ -x "$WSTUNNEL_BIN" ]]; then
-    log_ok "检测到已有 wstunnel：$WSTUNNEL_BIN"
+ensure_rtunnel() {
+  RTUNNEL_BIN="${BIN_DIR}/rtunnel"
+  if [[ -x "$RTUNNEL_BIN" ]]; then
+    log_ok "检测到已有 rtunnel：$RTUNNEL_BIN"
     return
   fi
 
-  log_info "未检测到 wstunnel，开始下载..."
-  download_and_install_wstunnel
+  log_info "未检测到 rtunnel，开始下载..."
+  download_and_install_rtunnel
 }
 
 #####################################
@@ -477,14 +562,14 @@ configure_sshd_security() {
   log_info "配置 sshd：禁止密码登录，仅允许公钥"
 
   if [[ -d /etc/ssh/sshd_config.d ]]; then
-    cat >/etc/ssh/sshd_config.d/99-wstunnel.conf <<EOF
+    cat >/etc/ssh/sshd_config.d/99-rtunnel.conf <<EOF
 PasswordAuthentication no
 ChallengeResponseAuthentication no
 PubkeyAuthentication yes
 UsePAM yes
 PermitRootLogin prohibit-password
 EOF
-    log_ok "已写入 /etc/ssh/sshd_config.d/99-wstunnel.conf"
+    log_ok "已写入 /etc/ssh/sshd_config.d/99-rtunnel.conf"
   else
     local cfg="/etc/ssh/sshd_config"
     if [[ ! -f "$cfg" ]]; then
@@ -581,8 +666,8 @@ check_sshd_service() {
     exit 1
   fi
 
-  nohup "$sshd_bin" -D >/var/log/sshd-wstunnel.log 2>&1 &
-  log_ok "已直接启动 sshd，日志: /var/log/sshd-wstunnel.log"
+  nohup "$sshd_bin" -D >/var/log/sshd-rtunnel.log 2>&1 &
+  log_ok "已直接启动 sshd，日志: /var/log/sshd-rtunnel.log"
 }
 
 check_ssh_port_22() {
@@ -630,36 +715,36 @@ ensure_ssh_server() {
 }
 
 #####################################
-# 启动 wstunnel server
+# 启动 rtunnel server
 #####################################
 
-start_wstunnel_server() {
-  local port="$WSTUNNEL_PORT"
+start_rtunnel_server() {
+  local port="$RTUNNEL_PORT"
   local host_short
   host_short="$(hostname -s 2>/dev/null || hostname || echo "unknown")"
   local log_file="${LOG_DIR}/${host_short}.log"
 
   # 检查现有进程
   local existing_pid
-  existing_pid=$(get_running_wstunnel_pid)
+  existing_pid=$(get_running_rtunnel_pid)
 
   if [[ -n "$existing_pid" && "$FORCE_START" == "0" ]]; then
-    log_warn "检测到已有 wstunnel 正在运行 (port=${port})，PID: $existing_pid"
+    log_warn "检测到已有 rtunnel 正在运行 (port=${port})，PID: $existing_pid"
     log_info "如需重新启动，请运行："
-    echo "  ./start_ws_tunnel.sh stop"
-    echo "  ./start_ws_tunnel.sh <args> --force"
+    echo "  ./qz_ssh_starter.sh stop"
+    echo "  ./qz_ssh_starter.sh <args> --force"
     return
   fi
 
   # 如果强制重启则 kill
   if [[ -n "$existing_pid" && "$FORCE_START" == "1" ]]; then
-    log_warn "--force 已启用，正在终止现有 wstunnel (PID: $existing_pid)..."
+    log_warn "--force 已启用，正在终止现有 rtunnel (PID: $existing_pid)..."
     kill -9 "$existing_pid"
     sleep 0.5
   fi
 
-  log_info "准备启动 wstunnel server:"
-  log_info "  命令: $WSTUNNEL_BIN server --restrict-to 127.0.0.1:22 ws://0.0.0.0:${port}"
+  log_info "准备启动 rtunnel server:"
+  log_info "  命令: $RTUNNEL_BIN localhost:22 ${port}"
   log_info "  日志: $log_file"
 
   if [[ "${DRY_RUN:-0}" == "1" ]]; then
@@ -667,12 +752,10 @@ start_wstunnel_server() {
     return
   fi
 
-  nohup "$WSTUNNEL_BIN" server \
-    --restrict-to 127.0.0.1:22 \
-    "ws://0.0.0.0:${port}" \
+  nohup "$RTUNNEL_BIN" localhost:22 "${port}" \
     >>"$log_file" 2>&1 &
 
-  log_info "等待 wstunnel 启动..."
+  log_info "等待 rtunnel 启动..."
 
   local newpid
   local max_attempts=10
@@ -680,15 +763,15 @@ start_wstunnel_server() {
 
   while [[ $attempt -lt $max_attempts ]]; do
     sleep 1
-    newpid=$(get_running_wstunnel_pid)
+    newpid=$(get_running_rtunnel_pid)
     if [[ -n "$newpid" ]]; then
-      log_ok "wstunnel 已成功启动 (port=${port})，PID: $newpid"
+      log_ok "rtunnel 已成功启动 (port=${port})，PID: $newpid"
       return
     fi
     attempt=$((attempt + 1))
   done
 
-  log_error "wstunnel 启动失败，等待 ${max_attempts} 秒后仍未检测到进程，请检查日志：$log_file"
+  log_error "rtunnel 启动失败，等待 ${max_attempts} 秒后仍未检测到进程，请检查日志：$log_file"
   exit 1
 }
 
@@ -697,20 +780,19 @@ start_wstunnel_server() {
 #####################################
 
 print_ssh_instructions() {
-  local port="$WSTUNNEL_PORT"
-  local pf_url="https://${WSS_HOST}${BASE_PATH}/proxy/${port}/"
-  local http_upgrade_path="${BASE_PATH}/proxy/${port}/v1"
+  local port="$RTUNNEL_PORT"
+  local ws_url="wss://${WSS_HOST}${BASE_PATH}/proxy/${port}/"
 
   echo
-  log_info "==== Port Forward URL（浏览器访问调试用） ===="
-  echo "  $pf_url"
+  log_info "==== WebSocket URL（调试用） ===="
+  echo "  $ws_url"
   echo
 
   log_info "==== 本地 SSH 一次性命令（在你的本地终端执行） ===="
   echo "ssh \\"
   echo "  -o StrictHostKeyChecking=no \\"
   echo "  -o UserKnownHostsFile=/dev/null \\"
-  echo "  -o ProxyCommand=\"wstunnel client --log-lvl=off -L stdio://%h:%p --http-upgrade-path-prefix ${http_upgrade_path} wss://${WSS_HOST}\" \\"
+  echo "  -o ProxyCommand=\"rtunnel ${ws_url} stdio://%h:%p\" \\"
   echo "  ${SSH_USER}@127.0.0.1"
   echo
 
@@ -721,7 +803,7 @@ Host qz-notebook-ssh
   User ${SSH_USER}
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
-  ProxyCommand wstunnel client --log-lvl=off -L stdio://%h:%p --http-upgrade-path-prefix ${http_upgrade_path} wss://${WSS_HOST}
+  ProxyCommand rtunnel ${ws_url} stdio://%h:%p
 EOF
   echo
 }
@@ -730,42 +812,42 @@ EOF
 # 进程检测与控制
 #####################################
 
-get_running_wstunnel_pid() {
-  # 匹配当前脚本目录中 bin/wstunnel 启动，且绑定了指定端口的 server 模式
-  pgrep -f "${BIN_DIR}/wstunnel server --restrict-to 127.0.0.1:22 ws://0.0.0.0:${WSTUNNEL_PORT}" || true
+get_running_rtunnel_pid() {
+  # 匹配当前脚本目录中 bin/rtunnel 启动，且绑定了指定端口的 server 模式
+  pgrep -f "${BIN_DIR}/rtunnel localhost:22 ${RTUNNEL_PORT}" || true
 }
 
-stop_wstunnel() {
+stop_rtunnel() {
   local pids
-  pids=$(pgrep -f "${BIN_DIR}/wstunnel server" || true)
+  pids=$(pgrep -f "${BIN_DIR}/rtunnel localhost:22" || true)
 
   if [[ -z "$pids" ]]; then
-    log_info "没有正在运行的 wstunnel 进程。"
+    log_info "没有正在运行的 rtunnel 进程。"
     exit 0
   fi
 
-  log_warn "检测到以下 wstunnel 进程，将终止："
+  log_warn "检测到以下 rtunnel 进程，将终止："
   echo "$pids"
 
   echo "$pids" | xargs kill -9
-  log_ok "已停止所有 wstunnel 服务。"
+  log_ok "已停止所有 rtunnel 服务。"
   exit 0
 }
 
-stop_all_wstunnel() {
+stop_all_rtunnel() {
   local pids
-  pids=$(pgrep -f "wstunnel server" || true)
+  pids=$(pgrep -f "rtunnel localhost:22" || true)
 
   if [[ -z "$pids" ]]; then
-    log_info "没有正在运行的 wstunnel 进程。"
+    log_info "没有正在运行的 rtunnel 进程。"
     exit 0
   fi
 
-  log_warn "检测到以下 wstunnel 进程，将终止："
+  log_warn "检测到以下 rtunnel 进程，将终止："
   echo "$pids"
 
   echo "$pids" | xargs kill -9
-  log_ok "已停止所有 wstunnel 服务。"
+  log_ok "已停止所有 rtunnel 服务。"
   exit 0
 }
 
@@ -779,8 +861,8 @@ main() {
   parse_url
   detect_arch
   ensure_ssh_server
-  ensure_wstunnel
-  start_wstunnel_server
+  ensure_rtunnel
+  start_rtunnel_server
   print_ssh_instructions
 }
 
