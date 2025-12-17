@@ -27,13 +27,13 @@ cd qz_ssh_starter
 
 如果无法访问 GitHub，可以使用镜像源下载，例如：
 ```
-wget https://github.akams.cn/https://raw.githubusercontent.com/jingyijun/qz_ssh_starter/main/qz_ssh_starter.sh
+wget https://gh-proxy.org/https://raw.githubusercontent.com/jingyijun/qz_ssh_starter/main/qz_ssh_starter.sh
 ```
 
 或者 
 
 ```bash
-git clone https://github.akams.cn/https://github.com/jingyijun/qz_ssh_starter.git
+git clone https:/gh-proxy.org/https://github.com/jingyijun/qz_ssh_starter.git
 cd qz_ssh_starter
 ```
 
