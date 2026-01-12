@@ -347,7 +347,8 @@ detect_arch() {
 
 readonly GITHUB_PROXIES=(
     ""  # Direct connection
-    "https://github.akams.cn/"
+    # "https://github.akams.cn/" # 这个只能下载 html 文件
+    "https://gh-proxy.org/"
     "https://gh-proxy.net/"
     "https://tvv.tw/"
 )
