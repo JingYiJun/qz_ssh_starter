@@ -12,7 +12,11 @@
 
 ## 快速开始
 
-### 下载本项目脚本
+> 注意：本工具需要 **服务端 + 客户端** 协同使用  
+> - **远程/集群侧**：在目标算力环境运行 `qz_ssh_starter.sh` 以安装/启动 openssh-server 与 rtunnel server。  
+> - **本地侧**：在个人电脑运行 `install_rtunnel.sh` 安装 rtunnel 客户端，用于通过 WebSocket 代理访问远程 SSH。
+
+### 步骤 1：在远程/集群侧下载本项目脚本
 
 ```bash
 wget https://raw.githubusercontent.com/jingyijun/qz_ssh_starter/main/qz_ssh_starter.sh
@@ -37,7 +41,7 @@ git clone https:/gh-proxy.org/https://github.com/jingyijun/qz_ssh_starter.git
 cd qz_ssh_starter
 ```
 
-### 运行脚本
+### 步骤 2：在远程/集群侧运行 `qz_ssh_starter.sh`
 
 ```bash
 # 基于环境变量运行（推荐）
@@ -51,7 +55,26 @@ bash qz_ssh_starter.sh --base-url "https://nat-notebook-inspire.sii.edu.cn${VC_P
 
 > 提示：首次运行会生成 `qz_ssh_data/` 目录（含二进制、日志等），后续重复启动不会重新下载。
 
-### 一键安装 rtunnel 到本地（跨平台：Linux/macOS/Windows Git Bash）
+运行成功之后会输出类似如下的 SSH 连接命令，可以直接在本地终端执行：
+
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="rtunnel wss://nat-notebook-inspire.sii.edu.cn/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE/proxy/10080 stdio://%h:%p" root@127.0.0.1
+```
+
+以及类似如下的 ~/.ssh/config 配置：
+```bash
+Host qz-notebook-ssh
+  HostName 127.0.0.1
+  User root
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  ProxyCommand rtunnel wss://nat-notebook-inspire.sii.edu.cn/ws-AAA/project-BBB/user-CCC/vscode/DDD/EEE/proxy/10080 stdio://%h:%p
+```
+
+> 提示：可以将 ~/.ssh/config 文件中的配置复制到 ~/.ssh/config 文件中，然后使用 `ssh qz-notebook-ssh` 命令连接远程服务器。
+
+
+### 步骤 3：在本地安装 rtunnel（跨平台：Linux/macOS/Windows Git Bash）
 
 ```bash
 ./install_rtunnel.sh
@@ -60,6 +83,11 @@ bash qz_ssh_starter.sh --base-url "https://nat-notebook-inspire.sii.edu.cn${VC_P
 - 脚本会自动测速 GitHub 镜像、从 releases 获取最新版本，并根据当前系统/架构下载对应的压缩包（Linux/macOS 为 tar.gz，Windows 为 zip）。
 - 安装位置：`$HOME/.local/bin/rtunnel`（Windows 为 `rtunnel.exe`）。如需在 shell 中直接使用，请按脚本提示将 `$HOME/.local/bin` 加入 PATH。
 - 可用环境变量：`RTUNNEL_VERSION`（指定版本，格式支持 `v1.1.0` 或 `1.1.0`，未指定则自动取最新）。
+
+### 步骤 4：本地测试并连接远程
+
+- 本地执行 `rtunnel --help` 确认安装成功。
+- 按远程脚本输出的 SSH 命令在本地终端执行，即可通过 WebSocket 隧道访问远程 22 端口。
 
 ## 参数与环境变量
 
@@ -75,8 +103,19 @@ bash qz_ssh_starter.sh --base-url "https://nat-notebook-inspire.sii.edu.cn${VC_P
 | `VC_BASE_URL`     | 完整 Base URL，若未传 `--base-url` 时使用                                      |
 | `VC_PREFIX`       | 仅包含路径的前缀（如 `/ws-XXX/...`），脚本会与 `VC_BASE_HOST` 拼接             |
 | `VC_BASE_HOST`    | 与 `VC_PREFIX` 搭配使用的 host，默认 `https://nat-notebook-inspire.sii.edu.cn` |
+| （交互）`--public-key` | 若未提供此参数且处于交互终端，脚本会提示粘贴 SSH 公钥；空输入则保留已有 authorized_keys |
 | `RTUNNEL_VERSION` | 自定义下载版本，默认自动获取最新稳定版本（vx.y.z）                             |
 | `DRY_RUN=1`       | 仅打印将要执行的 rtunnel 命令，不真正启动                                      |
+
+## VC_BASE_HOST 与启智资源空间对应关系
+
+| VC_BASE_HOST          | 启智平台资源空间                       |
+| --------------------- | -------------------------------------- |
+| https://nat-notebook-inspire.sii.edu.cn | CPU资源空间，可上网GPU资源 |
+| https://notebook-inspire.sii.edu.cn | 分布式训练空间，高性能计算 |
+| https://notebook-inspire-sj.sii.edu.cn | CI-情境智能-国产卡，SJ-资源空间 |
+
+- 若未设置 `VC_BASE_HOST` 且未显式传入 `--base-url` / `VC_BASE_URL`，脚本会交互提示选择资源空间（非交互默认使用 CPU/可上网GPU 对应的 host）；也可直接通过环境变量 `VC_BASE_HOST` 指定以跳过选择。
 
 ## 更多常用命令
 

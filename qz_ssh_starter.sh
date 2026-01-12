@@ -62,6 +62,94 @@ log_ok() {
 }
 
 #####################################
+# 公钥交互输入
+#####################################
+
+prompt_public_key_if_needed() {
+  # 已提供参数或环境变量则跳过
+  if [[ -n "${PUBLIC_KEY:-}" ]]; then
+    return
+  fi
+
+  # 非交互环境不询问，沿用旧行为（提示保留现有 authorized_keys）
+  if [[ ! -t 0 ]]; then
+    return
+  fi
+
+  log_info "未提供 --public-key，可在此粘贴 SSH 公钥（留空则保持现有 authorized_keys）："
+  read -r PUBLIC_KEY_INPUT
+
+  if [[ -n "$PUBLIC_KEY_INPUT" ]]; then
+    PUBLIC_KEY="$PUBLIC_KEY_INPUT"
+    log_ok "已接收公钥输入。"
+  else
+    log_warn "未输入公钥，将保留已有 authorized_keys。"
+  fi
+}
+
+#####################################
+# 启智资源空间（VC_BASE_HOST）选择
+#####################################
+
+readonly -a VC_BASE_HOSTS=(
+  "https://nat-notebook-inspire.sii.edu.cn"   # CPU资源空间，可上网GPU资源
+  "https://notebook-inspire.sii.edu.cn"        # 分布式训练空间，高性能计算
+  "https://notebook-inspire-sj.sii.edu.cn"     # CI-情境智能-国产卡，SJ-资源空间
+)
+
+readonly -a VC_BASE_HOST_DESCRIPTIONS=(
+  "CPU资源空间，可上网GPU资源"
+  "分布式训练空间，高性能计算"
+  "CI-情境智能-国产卡，SJ-资源空间"
+)
+
+VC_BASE_HOST_SELECTED=""
+
+select_vc_base_host() {
+  # 最高优先级：用户显式传入 VC_BASE_HOST 环境变量
+  if [[ -n "${VC_BASE_HOST:-}" ]]; then
+    VC_BASE_HOST_SELECTED="${VC_BASE_HOST%/}"
+    log_info "使用环境变量 VC_BASE_HOST：${VC_BASE_HOST_SELECTED}"
+    return
+  fi
+
+  # 若用户已提供 BASE_URL（参数）或 VC_BASE_URL（环境变量），无需再选择 VC_BASE_HOST
+  if [[ -n "${BASE_URL_RAW:-}" || -n "${VC_BASE_URL:-}" ]]; then
+    return
+  fi
+
+  local default_index=0
+
+  # 非交互环境下，直接采用默认资源空间
+  if [[ ! -t 0 ]]; then
+    VC_BASE_HOST_SELECTED="${VC_BASE_HOSTS[$default_index]}"
+    log_info "非交互环境，默认使用 VC_BASE_HOST=${VC_BASE_HOST_SELECTED}"
+    return
+  fi
+
+  log_info "请选择启智资源空间对应的 VC_BASE_HOST（回车默认 ${default_index}=CPU/可上网GPU）："
+  for i in "${!VC_BASE_HOSTS[@]}"; do
+    log_info "  ${i}) ${VC_BASE_HOSTS[$i]}  — ${VC_BASE_HOST_DESCRIPTIONS[$i]}"
+  done
+
+  read -p "[QUESTION] 你的选择: " -r host_choice
+
+  if [[ -z "$host_choice" ]]; then
+    host_choice="$default_index"
+  fi
+
+  if [[ "$host_choice" =~ ^[0-9]+$ ]] && [[ $host_choice -ge 0 && $host_choice -lt ${#VC_BASE_HOSTS[@]} ]]; then
+    VC_BASE_HOST_SELECTED="${VC_BASE_HOSTS[$host_choice]}"
+  else
+    log_warn "输入无效，使用默认 VC_BASE_HOST。"
+    VC_BASE_HOST_SELECTED="${VC_BASE_HOSTS[$default_index]}"
+  fi
+
+  VC_BASE_HOST_SELECTED="${VC_BASE_HOST_SELECTED%/}"
+  log_ok "已选择 VC_BASE_HOST：${VC_BASE_HOST_SELECTED}"
+}
+
+#####################################
 # 帮助信息
 #####################################
 
@@ -152,6 +240,8 @@ parse_args() {
     esac
   done
 
+  prompt_public_key_if_needed
+  select_vc_base_host
   resolve_base_url
   BASE_URL="${BASE_URL_RAW%/}"
 }
@@ -161,6 +251,10 @@ parse_args() {
 #####################################
 
 resolve_base_url() {
+  local effective_base_host
+  effective_base_host="${VC_BASE_HOST_SELECTED:-${VC_BASE_HOST:-https://nat-notebook-inspire.sii.edu.cn}}"
+  effective_base_host="${effective_base_host%/}"
+
   if [[ -n "${BASE_URL_RAW:-}" ]]; then
     log_info "使用传入的 Base URL：$BASE_URL_RAW"
     return
@@ -173,8 +267,7 @@ resolve_base_url() {
   fi
 
   if [[ -n "${VC_PREFIX:-}" ]]; then
-    local host="${VC_BASE_HOST:-https://nat-notebook-inspire.sii.edu.cn}"
-    host="${host%/}"
+    local host="$effective_base_host"
     local prefix="$VC_PREFIX"
     if [[ "$prefix" != /* ]]; then
       prefix="/$prefix"
