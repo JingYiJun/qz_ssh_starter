@@ -98,7 +98,7 @@ detect_arch() {
 
 readonly GITHUB_PROXIES=(
     ""  # Direct connection
-    "https://github.akams.cn/"
+    # "https://github.akams.cn/"
     "https://gh-proxy.net/"
     "https://tvv.tw/"
 )
@@ -337,61 +337,96 @@ download_and_install_rtunnel() {
 }
 
 #####################################
-# 检测 shell 并打印配置命令
+# 检测 shell 并写入 PATH 配置到 rc_file
 #####################################
 
-detect_shell_and_print_config() {
-  local shell_name
-  shell_name="${SHELL##*/}"
-  
+detect_shell_and_configure_path() {
+  local shell_path shell_name
+  shell_path="${SHELL:-}"
+  shell_name="${shell_path##*/}"
+
   local rc_file
   case "$shell_name" in
     bash)
-      rc_file="${HOME}/.bashrc"
+      # macOS 上 login shell 常读 ~/.bash_profile；Linux 多为 ~/.bashrc
+      if [[ -f "${HOME}/.bashrc" ]]; then
+        rc_file="${HOME}/.bashrc"
+      elif [[ -f "${HOME}/.bash_profile" ]]; then
+        rc_file="${HOME}/.bash_profile"
+      else
+        rc_file="${HOME}/.bashrc"
+      fi
       ;;
     zsh)
-      rc_file="${HOME}/.zshrc"
+      if [[ -n "${ZDOTDIR:-}" ]]; then
+        rc_file="${ZDOTDIR%/}/.zshrc"
+      else
+        rc_file="${HOME}/.zshrc"
+      fi
       ;;
     fish)
       rc_file="${HOME}/.config/fish/config.fish"
       ;;
     *)
-      # 默认使用 .profile
       rc_file="${HOME}/.profile"
-      log_warn "未识别的 shell: $shell_name，使用 .profile"
+      if [[ -n "$shell_name" ]]; then
+        log_warn "未识别的 shell: $shell_name，使用 $rc_file"
+      else
+        log_warn "未检测到 SHELL 环境变量，使用 $rc_file"
+      fi
       ;;
   esac
 
-  log_info "检测到 shell: $shell_name"
-  echo
-  log_info "==== 需要添加到 $rc_file 的命令 ===="
-  
-  if [[ "$shell_name" == "fish" ]]; then
-    cat <<EOF
-# rtunnel
-fish_add_path \$HOME/.local/bin
-EOF
+  log_info "检测到 shell: ${shell_name:-unknown}"
+
+  # 确保 rc_file 存在
+  mkdir -p "$(dirname "$rc_file")"
+  touch "$rc_file"
+
+  local marker_begin marker_end
+  marker_begin="# >>> rtunnel >>>"
+  marker_end="# <<< rtunnel <<<"
+
+  # 若已写入过（存在标记），则跳过
+  if command -v grep >/dev/null 2>&1; then
+    if grep -Fq "$marker_begin" "$rc_file" || grep -Fq "$marker_end" "$rc_file"; then
+      log_ok "已检测到 $rc_file 中存在 rtunnel PATH 配置，跳过写入。"
+      echo
+      log_info "如需立即生效，请执行："
+      echo "  source \"$rc_file\""
+      echo
+      return
+    fi
   else
-    cat <<EOF
-# rtunnel
-export PATH="\$HOME/.local/bin:\$PATH"
-EOF
+    # fallback：不用 grep（极少数环境）
+    local rc_content
+    rc_content="$(<"$rc_file")"
+    if [[ "$rc_content" == *"$marker_begin"* || "$rc_content" == *"$marker_end"* ]]; then
+      log_ok "已检测到 $rc_file 中存在 rtunnel PATH 配置，跳过写入。"
+      echo
+      log_info "如需立即生效，请执行："
+      echo "  source \"$rc_file\""
+      echo
+      return
+    fi
   fi
-  
+
+  echo >>"$rc_file"
+  {
+    echo "$marker_begin"
+    echo "# rtunnel"
+    if [[ "$shell_name" == "fish" ]]; then
+      echo "fish_add_path \$HOME/.local/bin"
+    else
+      echo "export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+    echo "$marker_end"
+  } >>"$rc_file"
+
+  log_ok "已将 rtunnel PATH 配置写入：$rc_file"
   echo
-  log_info "或者手动执行以下命令添加到配置文件中："
-  if [[ "$shell_name" == "fish" ]]; then
-    echo "  echo 'fish_add_path \$HOME/.local/bin' >> $rc_file"
-  else
-    echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $rc_file"
-  fi
-  echo
-  log_info "添加后，执行以下命令使配置生效："
-  if [[ "$shell_name" == "fish" ]]; then
-    echo "  source $rc_file"
-  else
-    echo "  source $rc_file"
-  fi
+  log_info "请执行以下命令使配置立即生效（或重开一个终端）："
+  echo "  source \"$rc_file\""
   echo
 }
 
@@ -442,7 +477,7 @@ main() {
   
   # Windows 下可能不需要 shell 配置，但 Git Bash 等环境仍可使用
   if [[ "$OS_TYPE" != "windows" ]]; then
-    detect_shell_and_print_config
+    detect_shell_and_configure_path
   else
     log_info "Windows 系统：请确保 $INSTALL_DIR 已添加到 PATH 环境变量中"
     echo
