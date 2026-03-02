@@ -93,13 +93,17 @@ prompt_public_key_if_needed() {
 
 readonly -a VC_BASE_HOSTS=(
   "https://nat-notebook-inspire.sii.edu.cn"   # CPU资源空间，可上网GPU资源
-  "https://notebook-inspire.sii.edu.cn"        # 分布式训练空间，高性能计算
+  "https://nat2-notebook-inspire.sii.edu.cn"   # CPU资源空间-2，HPC-可上网区域
+  "https://notebook-inspire.sii.edu.cn"        # 分布式训练空间 H100，高性能计算
+  "https://ai-notebook-inspire.sii.edu.cn"     # 分布式训练空间 H200
   "https://notebook-inspire-sj.sii.edu.cn"     # CI-情境智能-国产卡，SJ-资源空间
 )
 
 readonly -a VC_BASE_HOST_DESCRIPTIONS=(
   "CPU资源空间，可上网GPU资源"
-  "分布式训练空间，高性能计算"
+  "CPU资源空间-2，HPC-可上网区域"
+  "分布式训练空间 H100，高性能计算"
+  "分布式训练空间 H200"
   "CI-情境智能-国产卡，SJ-资源空间"
 )
 
